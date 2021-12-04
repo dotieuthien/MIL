@@ -1,3 +1,4 @@
+import configparser
 import torch
 import torch.nn as nn
 
@@ -5,9 +6,13 @@ import pennylane as qml
 from pennylane import numpy as np
 
 
-n_qubits = 4
-q_depth = 6
-q_delta = 0.01
+config = configparser.ConfigParser()
+config.read('configs/qresnet.ini')
+
+n_qubits = config.getint('MODEL', 'n_qubits')
+q_depth = config.getint('MODEL', 'q_depth')
+q_delta = config.getfloat('MODEL', 'q_delta')
+
 # Initialize a PennyLane device with a default.qubit backend
 dev = qml.device("default.qubit", wires=n_qubits)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -93,12 +98,12 @@ class DressedQuantumNet(nn.Module):
         q_out = q_out.to(device)
 
         for elem in q_in:
-            drawer = qml.draw(quantum_net)
+            # drawer = qml.draw(quantum_net)
             q_out_elem = quantum_net(elem, self.q_params).float().unsqueeze(0).to(device)
-            print(drawer(elem, self.q_params))
+            # print(drawer(elem, self.q_params))
             q_out = torch.cat((q_out, q_out_elem))
 
-        # return the two-dimensional prediction from the postprocessing layer
+        # Return the two-dimensional prediction from the postprocessing layer
         return self.post_net(q_out)
 
 

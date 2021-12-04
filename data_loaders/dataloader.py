@@ -9,9 +9,6 @@ import torch
 from torchvision import datasets, transforms
 from torch.utils.data import Dataset, DataLoader
 
-torch.manual_seed(42)
-np.random.seed(42)
-
 # Plotting
 import matplotlib.pyplot as plt
 

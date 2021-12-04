@@ -10,7 +10,7 @@ from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 
 
-def load_csv(slide_path):
+def load_svs(slide_path):
     img = open_slide(slide_path)
     # print('Levels: ', img.level_count)
     # print('Size: ', img.level_dimensions)
@@ -53,7 +53,7 @@ class Slide(Dataset):
 
     def __getitem__(self, item):
         img_path = self.img_names[item]
-        img = np.array(load_csv(img_path))
+        img = np.array(load_svs(img_path))
         img = rgba2rgb(img)
 
         img_tensor = self.img_transforms(img)

@@ -3,6 +3,7 @@ import os
 import copy
 import matplotlib.pyplot as plt
 import argparse
+import configparser
 from data_loaders.dataloader import PathologyLoader
 
 import torch
@@ -15,34 +16,14 @@ from torch.utils.tensorboard import SummaryWriter
 
 import pennylane as qml
 from pennylane import numpy as np
-from models.model_transfer_simple import DressedQuantumNet
+from models.qresnet import DressedQuantumNet
 
-torch.manual_seed(42)
-np.random.seed(42)
 
+config = configparser.ConfigParser()
+config.read('configs/qresnet.ini')
 
 # OpenMP: number of parallel threads.
 os.environ["OMP_NUM_THREADS"] = "1"
-
-step = 0.0005               # Learning rate
-batch_size = 4               # Number of samples for each training step
-num_epochs = 400
-gamma_lr_scheduler = 0.1    # Learning rate reduction applied every 10 epochs.
-start_time = time.time()
-
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-writer = SummaryWriter('runs/exp_4/exp_quantum')
-
-# Initialize dataloader
-img_dir = "/home/hades/Desktop/quantum-neural-network/data/tile/k1_train"
-label_file = "/home/hades/Desktop/quantum-neural-network/data/tile/k1_train/top1_k1N2_train.csv"
-dataloader = PathologyLoader(batch_size, True, img_dir, label_file, 'train').loader()
-data_size = dataloader.dataset.__len__()
-
-val_img_dir = '/home/hades/Desktop/quantum-neural-network/data/tile/k1_val'
-val_label_file = '/home/hades/Desktop/quantum-neural-network/data/tile/k1_val/top1_k1N2_val.csv'
-valid_dataloader = PathologyLoader(1, False, val_img_dir, val_label_file, 'valid').loader()
-val_data_size = valid_dataloader.dataset.__len__()
 
 
 def imshow_tensor_img(tensor):
@@ -54,94 +35,94 @@ def imshow_tensor_img(tensor):
     plt.show()
 
 
-# Model
-model_hybrid = torchvision.models.resnet18(pretrained=True)
-
-for param in model_hybrid.parameters():
-    param.requires_grad = False
-
-# Notice that model_hybrid.fc is the last layer of ResNet18
-model_hybrid.fc = DressedQuantumNet()
-# model_hybrid.fc = nn.Linear(512, 2)
-
-# Use CUDA or CPU according to the "device" object.
-model_hybrid = model_hybrid.to(device)
-
-criterion = nn.CrossEntropyLoss()
-optimizer_hybrid = optim.Adam(model_hybrid.fc.parameters(), lr=step)
-exp_lr_scheduler = lr_scheduler.StepLR(
-    optimizer_hybrid, step_size=10, gamma=gamma_lr_scheduler
-)
-
-
-def train_model(model, criterion, optimizer, scheduler, num_epochs):
+def train_model():
     parser = argparse.ArgumentParser(description="Trains the quantum Resnet model.")
-    parser.add_argument("--epochs", type=int, default=300, help="Number of epochs")
-    parser.add_argument("--epochs", type=int, default=300, help="Number of epochs")
-    parser.add_argument("--n_cpu", type=int, default=8, help="Number of cpu threads to use during batch generation")
-    parser.add_argument("--pretrained_weights", type=str,
-                        help="Path to checkpoint file (.weights or .pth). Starts training from checkpoint model")
+    parser.add_argument("--training_img_dir", type=str, default='data/tile/k1_train', help="Directory to images")
+    parser.add_argument("--training_label_dir", type=str, default='data/tile/k1_train/top1_k1N2_train.csv',
+                        help="Directory to labels")
+    parser.add_argument("--val_img_dir", type=str, default='data/tile/k1_val', help="Directory to images")
+    parser.add_argument("--val_label_dir", type=str, default='data/tile/k1_val/top1_k1N2_val.csv',
+                        help="Directory to labels")
+    parser.add_argument("--runs", type=str, default='runs/exp_1/exp_quantum',
+                        help="Directory to tensorboard folder")
+    args = parser.parse_args()
+
+    # Initialize dataloader
+    dataloader = PathologyLoader(config.getint('TRAIN', 'batch_size'), True, args.training_img_dir, args.training_label_dir, 'train').loader()
+    valid_dataloader = PathologyLoader(1, False, args.val_img_dir, args.val_label_dir, 'valid').loader()
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    writer = SummaryWriter(args.runs)
+
+    # Model
+    model_hybrid = torchvision.models.resnet18(pretrained=True)
+    if not config.getboolean('TRAIN', 'requires_grad'):
+        for param in model_hybrid.parameters():
+            param.requires_grad = False
+
+    # Notice that model_hybrid.fc is the last layer of ResNet18
+    model_hybrid.fc = DressedQuantumNet()
+    # model_hybrid.fc = nn.Linear(512, 2)
+
+    # Use CUDA or CPU according to the "device" object.
+    model_hybrid = model_hybrid.to(device)
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model_hybrid.fc.parameters(), lr=config.getfloat('TRAIN', 'step'))
+    exp_lr_scheduler = lr_scheduler.StepLR(
+        optimizer, step_size=10, gamma=config.getfloat('TRAIN', 'gamma_lr_scheduler')
+    )
 
     since = time.time()
-    best_model_wts = copy.deepcopy(model.state_dict())
-    best_acc = 0.0
-    best_loss = 10000.0  # Large arbitrary number
     best_acc_train = 0.0
     best_loss_train = 10000.0  # Large arbitrary number
-    print("Training started:")
+
+    num_epochs = config.getint('TRAIN', 'num_epochs')
 
     for epoch in range(num_epochs):
         # Each epoch has a training and validation phase
-        model.train()
-        running_loss = 0.0
-        running_corrects = 0
+        model_hybrid.train()
+        training_loss = 0
+        training_acc = 0
 
         for batch_id, (inputs, labels) in enumerate(dataloader):
-            batch_size_ = len(inputs)
             inputs = inputs.to(device)
             # imshow_tensor_img(inputs[0].cpu())
             labels = labels.to(device)
             optimizer.zero_grad()
 
             # Track/compute gradient and make an optimization step only when training
-            outputs = model(inputs)
+            outputs = model_hybrid(inputs)
             _, preds = torch.max(outputs, 1)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
 
-            # Print iteration results
-            running_loss += loss.item() * batch_size_
+            # Update iteration results
+            training_loss += loss.item()
             batch_corrects = torch.sum(preds == labels.data).item()
-            running_corrects += batch_corrects
+            training_acc += batch_corrects / labels.size(0)
 
-        # Print epoch results
-        epoch_loss = running_loss / data_size
-        epoch_acc = running_corrects / data_size
-
+        training_loss = training_loss / (batch_id + 1)
+        training_acc = training_acc / (batch_id + 1)
 
         print(
-            "Epoch: {}/{} Loss: {:.4f} Acc: {:.4f}".format(
+            "Train: {}/{} Loss: {:.4f} Acc: {:.4f}".format(
                 epoch + 1,
                 num_epochs,
-                epoch_loss,
-                epoch_acc,
+                training_loss,
+                training_acc,
             )
         )
 
-        writer.add_scalar('training acc', epoch_acc, epoch)
-        writer.add_scalar('training loss', epoch_loss, epoch)
+        writer.add_scalar('training acc', training_acc, epoch)
+        writer.add_scalar('training loss', training_loss, epoch)
 
-        if epoch_acc > best_acc_train:
-            best_acc_train = epoch_acc
-
-        if epoch_loss < best_loss_train:
-            best_loss_train = epoch_loss
-
-        valid_loss, valid_acc = valid_model(valid_dataloader, model, criterion)
+        valid_loss, valid_acc = valid_model(valid_dataloader, model_hybrid, device, criterion)
 
         print(
-            "Eval Epoch: {}/{} Loss: {:.4f} Acc: {:.4f}".format(
+            "Eval: {}/{} Loss: {:.4f} Acc: {:.4f}".format(
                 epoch + 1,
                 num_epochs,
                 valid_loss,
@@ -151,46 +132,47 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs):
         writer.add_scalar('valid acc', valid_acc, epoch)
         writer.add_scalar('valid loss', valid_loss, epoch)
 
+        if valid_acc > best_acc_train and valid_loss < best_loss_train:
+            best_acc_train = valid_acc
+            best_loss_train = valid_loss
+            checkpoint_path = os.path.join(args.runs, "best_checkpoint.pth")
+            torch.save(model_hybrid.state_dict(), checkpoint_path)
+
         # Update learning rate
-        # scheduler.step()
+        exp_lr_scheduler.step()
 
-
-
-    # Print final results
-    model.load_state_dict(best_model_wts)
     time_elapsed = time.time() - since
     print(
         "Training completed in {:.0f}m {:.0f}s".format(time_elapsed // 60, time_elapsed % 60)
     )
 
 
-def valid_model(valid_dataloader, model, criterion):
+def valid_model(valid_dataloader, model, device, criterion):
     model.eval()
-    running_loss = 0
-    running_corrects = 0
+    valid_loss = 0
+    valid_acc = 0
 
     with torch.no_grad():
         for batch_id, (inputs, labels) in enumerate(valid_dataloader):
             inputs = inputs.to(device)
             labels = labels.to(device)
 
-            # Track/compute gradient and make an optimization step only when training
             outputs = model(inputs)
             _, preds = torch.max(outputs, 1)
             loss = criterion(outputs, labels)
 
-            running_loss += loss.item()
+            valid_loss += loss.item()
             batch_corrects = torch.sum(preds == labels.data).item()
-            running_corrects += batch_corrects
+            valid_acc += batch_corrects
 
-    running_loss = running_loss / val_data_size
-    running_corrects = running_corrects / val_data_size
+    valid_loss = valid_loss / (batch_id + 1)
+    valid_acc = valid_acc / (batch_id + 1)
 
-    return running_loss, running_corrects
+    return valid_loss, valid_acc
 
 
 if __name__ == '__main__':
-    train_model(model_hybrid, criterion, optimizer_hybrid, exp_lr_scheduler, num_epochs=num_epochs)
+    train_model()
 
 
 

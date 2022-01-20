@@ -29,16 +29,21 @@ class Pathology(Dataset):
             self.img_names.append(row[0])
             self.labels.append(int(row[2]))
 
+        n = np.random.randint(1, 4)
         self.img_transforms = transforms.Compose(
                 [
                     # transforms.RandomResizedCrop(224),     # uncomment for data augmentation
-                    # transforms.RandomHorizontalFlip(),     # uncomment for data augmentation
-                    transforms.Resize(256),
-                    transforms.CenterCrop(224),
+                    transforms.RandomHorizontalFlip(),     # uncomment for data augmentation
+                    transforms.RandomVerticalFlip(),
+                    # transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5)),
+                    transforms.RandomAdjustSharpness(n),
+                    # transforms.Resize(256),
+                    # transforms.CenterCrop(224),
                     transforms.ToTensor(),
                     # Normalize input channels using mean values and standard deviations of ImageNet.
                     # transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
                 ])
+        self.valid_transform = transforms.ToTensor()
 
     def __len__(self):
         return len(self.img_names)
@@ -46,14 +51,17 @@ class Pathology(Dataset):
     def __getitem__(self, item):
         if self.mode == 'train':
             img_name = 'toptile_k1N2_train_' + self.img_names[item] + '.png'
+            img_transforms = self.img_transforms
         elif self.mode == 'valid':
             img_name = 'toptile_k1N2_val_' + self.img_names[item] + '.png'
+            img_transforms = self.valid_transform
+
         img_path = os.path.join(self.img_dir, img_name)
         image = Image.open(img_path)
         label = self.labels[item]
 
         # Convert to tensor
-        img_tensor = self.img_transforms(image)
+        img_tensor = img_transforms(image)
         label_tensor = torch.tensor(label)
 
         return img_tensor, label_tensor

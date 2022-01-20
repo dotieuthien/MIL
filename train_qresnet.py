@@ -43,7 +43,7 @@ def train_model():
     parser.add_argument("--val_img_dir", type=str, default='data/tile/k1_val', help="Directory to images")
     parser.add_argument("--val_label_dir", type=str, default='data/tile/k1_val/top1_k1N2_val.csv',
                         help="Directory to labels")
-    parser.add_argument("--runs", type=str, default='runs/exp_1/exp_quantum',
+    parser.add_argument("--runs", type=str, default='runs/exp_qresnet4',
                         help="Directory to tensorboard folder")
     args = parser.parse_args()
 
@@ -64,6 +64,7 @@ def train_model():
     # Notice that model_hybrid.fc is the last layer of ResNet18
     model_hybrid.fc = DressedQuantumNet()
     # model_hybrid.fc = nn.Linear(512, 2)
+    model_hybrid.load_state_dict(torch.load('/home/hades/Desktop/q/runs/exp_qresnet3/best_checkpoint_14.pth'))
 
     # Use CUDA or CPU according to the "device" object.
     model_hybrid = model_hybrid.to(device)
@@ -71,12 +72,13 @@ def train_model():
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model_hybrid.fc.parameters(), lr=config.getfloat('TRAIN', 'step'))
     exp_lr_scheduler = lr_scheduler.StepLR(
-        optimizer, step_size=10, gamma=config.getfloat('TRAIN', 'gamma_lr_scheduler')
+        optimizer, step_size=30, gamma=config.getfloat('TRAIN', 'gamma_lr_scheduler')
     )
 
     since = time.time()
     best_acc_train = 0.0
-    best_loss_train = 10000.0  # Large arbitrary number
+    best_acc_valid = 0.0
+    best_loss_valid = 10000.0  # Large arbitrary number
 
     num_epochs = config.getint('TRAIN', 'num_epochs')
 
@@ -132,10 +134,15 @@ def train_model():
         writer.add_scalar('valid acc', valid_acc, epoch)
         writer.add_scalar('valid loss', valid_loss, epoch)
 
-        if valid_acc > best_acc_train and valid_loss < best_loss_train:
-            best_acc_train = valid_acc
-            best_loss_train = valid_loss
-            checkpoint_path = os.path.join(args.runs, "best_checkpoint.pth")
+        if valid_acc > best_acc_valid and valid_loss < best_loss_valid:
+            best_acc_valid = valid_acc
+            best_loss_valid = valid_loss
+
+            checkpoint_path = os.path.join(args.runs, "best_checkpoint_%s.pth" % str(epoch))
+            torch.save(model_hybrid.state_dict(), checkpoint_path)
+        elif valid_acc == best_acc_valid and training_acc > best_acc_train:
+            best_acc_train = training_acc
+            checkpoint_path = os.path.join(args.runs, "best_checkpoint_%s.pth" % str(epoch))
             torch.save(model_hybrid.state_dict(), checkpoint_path)
 
         # Update learning rate

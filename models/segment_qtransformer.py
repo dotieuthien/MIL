@@ -80,7 +80,7 @@ class Segment(nn.Module):
 if __name__ == '__main__':
     from data_loaders.slide_loader import SlideLoader
 
-    img_dir = '/home/hades/Desktop/quantum-neural-network/data/slide'
+    img_dir = '/home/hades/Desktop/q/data/slide'
     dataloader = SlideLoader(1, True, img_dir).loader()
 
     cnn_model = torchvision.models.resnet18(pretrained=True)
@@ -101,6 +101,7 @@ if __name__ == '__main__':
         batch, c, h, w = f.size()
         # batch x len x feature
         f = f.view(batch, c, -1).long()
+        print(f.size())
 
         # Feed forward
         output = qtrasnsformer(f)

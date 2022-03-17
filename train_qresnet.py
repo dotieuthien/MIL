@@ -43,9 +43,9 @@ def train_model():
     parser.add_argument('--workers', default=4, type=int, metavar='N',
                         help='number of data loading workers (default: 4)')
     parser.add_argument('--data-loader', default='Which data loader', type=str)
-    parser.add_argument("--training-img-file", type=str, default='data/tile/k1_train', 
+    parser.add_argument("--training-img-dir", type=str, default='data/tile/k1_train', 
                         help="directory to images")
-    parser.add_argument("--training-label-dir", type=str, default='data/tile/k1_train/top1_k1N2_train.csv',
+    parser.add_argument("--training-label-file", type=str, default='data/tile/k1_train/top1_k1N2_train.csv',
                         help="directory to labels")
     parser.add_argument("--val-img-dir", type=str, default='data/tile/k1_val', 
                         help="directory to images")
@@ -57,9 +57,9 @@ def train_model():
                         help='Which optimizer')
     parser.add_argument('--epochs', default=90, type=int, metavar='N',
                         help='number of total epochs to run')
-    parser.add_argument('--train-batch', default=256, type=int, metavar='N',
+    parser.add_argument('--train-batch', default=1, type=int, metavar='N',
                         help='train batch size (default: 256)')
-    parser.add_argument('--test-batch', default=200, type=int, metavar='N',
+    parser.add_argument('--test-batch', default=1, type=int, metavar='N',
                         help='test batch size (default: 200)')
     parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                         metavar='LR', help='initial learning rate')
@@ -108,7 +108,7 @@ def train_model():
 
         train_loader = torch.utils.data.DataLoader(
             datasets.ImageFolder(args.training_img_dir, transforms.Compose([
-                transforms.RandomSizedCrop(224),
+                transforms.RandomCrop(224),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 normalize,
@@ -118,7 +118,7 @@ def train_model():
 
         val_loader = torch.utils.data.DataLoader(
             datasets.ImageFolder(args.val_img_dir, transforms.Compose([
-                transforms.Scale(256),
+                transforms.Resize(256),
                 transforms.CenterCrop(224),
                 transforms.ToTensor(),
                 normalize,
@@ -167,7 +167,8 @@ def train_model():
         for batch_id, (inputs, labels) in enumerate(train_loader):
             inputs = inputs.to(device)
             labels = labels.to(device)
-            # imshow_tensor_img(inputs[0].cpu())
+            print(labels)
+            imshow_tensor_img(inputs[0].cpu())
             optimizer.zero_grad()
             # Feed
             outputs = model_hybrid(inputs)

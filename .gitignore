@@ -1,4 +1,6 @@
-data
+data/tile
+data/slide
+data/test_data_pennylane
 __pycache__
 .idea
 */__pycache__

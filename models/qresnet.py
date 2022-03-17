@@ -7,7 +7,7 @@ from pennylane import numpy as np
 
 
 config = configparser.ConfigParser()
-config.read('configs/qresnet.ini')
+config.read('/mnt/d/q/configs/qresnet.ini')
 
 n_qubits = config.getint('MODEL', 'n_qubits')
 q_depth = config.getint('MODEL', 'q_depth')

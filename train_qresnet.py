@@ -1,11 +1,10 @@
+from statistics import mode
 import time
 import os
 import copy
 import matplotlib.pyplot as plt
 import argparse
 import configparser
-from data_loaders.dataloader import PathologyLoader
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -16,6 +15,9 @@ from torch.utils.tensorboard import SummaryWriter
 
 import pennylane as qml
 from pennylane import numpy as np
+
+from sympy import arg
+from loaders.tile_loader import PathologyLoader
 from models.qresnet import DressedQuantumNet
 
 
@@ -36,43 +38,117 @@ def imshow_tensor_img(tensor):
 
 
 def train_model():
-    parser = argparse.ArgumentParser(description="Trains the quantum Resnet model.")
-    parser.add_argument("--training_img_dir", type=str, default='data/tile/k1_train', help="Directory to images")
-    parser.add_argument("--training_label_dir", type=str, default='data/tile/k1_train/top1_k1N2_train.csv',
-                        help="Directory to labels")
-    parser.add_argument("--val_img_dir", type=str, default='data/tile/k1_val', help="Directory to images")
-    parser.add_argument("--val_label_dir", type=str, default='data/tile/k1_val/top1_k1N2_val.csv',
-                        help="Directory to labels")
+    parser = argparse.ArgumentParser(description="Pytorch Training Classification Model")
+    # Dataset
+    parser.add_argument('--workers', default=4, type=int, metavar='N',
+                        help='number of data loading workers (default: 4)')
+    parser.add_argument('--data-loader', default='Which data loader', type=str)
+    parser.add_argument("--training-img-file", type=str, default='data/tile/k1_train', 
+                        help="directory to images")
+    parser.add_argument("--training-label-dir", type=str, default='data/tile/k1_train/top1_k1N2_train.csv',
+                        help="directory to labels")
+    parser.add_argument("--val-img-dir", type=str, default='data/tile/k1_val', 
+                        help="directory to images")
+    parser.add_argument("--val-label-file", type=str, default='data/tile/k1_val/top1_k1N2_val.csv',
+                        help="directory to labels")
+
+    # Optimization
+    parser.add_argument('--optim', default='sgd', type=str,
+                        help='Which optimizer')
+    parser.add_argument('--epochs', default=90, type=int, metavar='N',
+                        help='number of total epochs to run')
+    parser.add_argument('--train-batch', default=256, type=int, metavar='N',
+                        help='train batch size (default: 256)')
+    parser.add_argument('--test-batch', default=200, type=int, metavar='N',
+                        help='test batch size (default: 200)')
+    parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
+                        metavar='LR', help='initial learning rate')
+    # parser.add_argument('--drop', '--dropout', default=0, type=float,
+    #                     metavar='Dropout', help='Dropout ratio')
+    parser.add_argument('--schedule', type=int, nargs='+', default=[150, 225],
+                        help='Decrease learning rate at these epochs.')
+    parser.add_argument('--gamma', type=float, default=0.1, help='LR is multiplied by gamma on schedule.')
+    parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
+                        help='momentum')
+    parser.add_argument('--weight-decay', '--wd', default=1e-4, type=float,
+                        metavar='W', help='weight decay (default: 1e-4)')
+
+    # Checkpoints
+    parser.add_argument('--checkpoint', default='checkpoint', type=str, metavar='PATH',
+                        help='path to save checkpoint (default: checkpoint)')
+    parser.add_argument('--resume', default='', type=str, metavar='PATH',
+                        help='path to latest checkpoint (default: none)')
     parser.add_argument("--runs", type=str, default='runs/exp_qresnet4',
                         help="Directory to tensorboard folder")
+
+    # Architecture
+    parser.add_argument('--arch', metavar='ARCH', default='resnet18',
+                        help='model architecture')
+
     args = parser.parse_args()
 
     # Initialize dataloader
-    dataloader = PathologyLoader(config.getint('TRAIN', 'batch_size'), True, args.training_img_dir, args.training_label_dir, 'train').loader()
-    valid_dataloader = PathologyLoader(1, False, args.val_img_dir, args.val_label_dir, 'valid').loader()
+    if args.data_loader == 'from_csv':
+        train_loader = PathologyLoader(
+            batch_size=args.train_batch, 
+            shuffle=True, 
+            img_dir=args.training_img_dir, label_file=args.training_label_file, 
+            mode='train').loader()
+
+        val_loader = PathologyLoader(
+            batch_size=args.test_batch, 
+            shuffle=False,
+            img_dir=args.val_img_dir, label_file=args.val_label_file,
+            mode='valid').loader()
+
+    elif args.data_loader == 'from_folder':
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225])
+
+        train_loader = torch.utils.data.DataLoader(
+            datasets.ImageFolder(args.training_img_dir, transforms.Compose([
+                transforms.RandomSizedCrop(224),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ])),
+            batch_size=args.train_batch, shuffle=True,
+            num_workers=args.workers, pin_memory=True)
+
+        val_loader = torch.utils.data.DataLoader(
+            datasets.ImageFolder(args.val_img_dir, transforms.Compose([
+                transforms.Scale(256),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                normalize,
+            ])),
+            batch_size=args.test_batch, shuffle=False,
+            num_workers=args.workers, pin_memory=True)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+    # Tensorboard
     writer = SummaryWriter(args.runs)
 
-    # Model
+    # Create model
     model_hybrid = torchvision.models.resnet18(pretrained=True)
-    if not config.getboolean('TRAIN', 'requires_grad'):
-        for param in model_hybrid.parameters():
-            param.requires_grad = False
-
-    # Notice that model_hybrid.fc is the last layer of ResNet18
     model_hybrid.fc = DressedQuantumNet()
-    # model_hybrid.fc = nn.Linear(512, 2)
-    model_hybrid.load_state_dict(torch.load('/home/hades/Desktop/q/runs/exp_qresnet3/best_checkpoint_14.pth'))
-
-    # Use CUDA or CPU according to the "device" object.
     model_hybrid = model_hybrid.to(device)
+    # model_hybrid.load_state_dict(torch.load('/home/hades/Desktop/q/runs/exp_qresnet3/best_checkpoint_14.pth'))
 
+    # Define loss
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model_hybrid.fc.parameters(), lr=config.getfloat('TRAIN', 'step'))
+    # Define optimizer
+    if args.optim == 'adam':
+        optimizer = optim.Adam(model_hybrid.parameters(), lr=config.getfloat('TRAIN', 'step'))
+    elif args.optim == 'sgd':
+        optimizer = optim.SGD(model_hybrid.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+
     exp_lr_scheduler = lr_scheduler.StepLR(
-        optimizer, step_size=30, gamma=config.getfloat('TRAIN', 'gamma_lr_scheduler')
+        optimizer, 
+        step_size=30, 
+        gamma=config.getfloat('TRAIN', 'gamma_lr_scheduler')
     )
 
     since = time.time()
@@ -88,15 +164,15 @@ def train_model():
         training_loss = 0
         training_acc = 0
 
-        for batch_id, (inputs, labels) in enumerate(dataloader):
+        for batch_id, (inputs, labels) in enumerate(train_loader):
             inputs = inputs.to(device)
-            # imshow_tensor_img(inputs[0].cpu())
             labels = labels.to(device)
+            # imshow_tensor_img(inputs[0].cpu())
             optimizer.zero_grad()
-
-            # Track/compute gradient and make an optimization step only when training
+            # Feed
             outputs = model_hybrid(inputs)
             _, preds = torch.max(outputs, 1)
+            # Compute loss
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
@@ -121,7 +197,7 @@ def train_model():
         writer.add_scalar('training acc', training_acc, epoch)
         writer.add_scalar('training loss', training_loss, epoch)
 
-        valid_loss, valid_acc = valid_model(valid_dataloader, model_hybrid, device, criterion)
+        valid_loss, valid_acc = valid_model(val_loader, model_hybrid, device, criterion)
 
         print(
             "Eval: {}/{} Loss: {:.4f} Acc: {:.4f}".format(
@@ -134,10 +210,10 @@ def train_model():
         writer.add_scalar('valid acc', valid_acc, epoch)
         writer.add_scalar('valid loss', valid_loss, epoch)
 
+        # Save the best
         if valid_acc > best_acc_valid and valid_loss < best_loss_valid:
             best_acc_valid = valid_acc
             best_loss_valid = valid_loss
-
             checkpoint_path = os.path.join(args.runs, "best_checkpoint_%s.pth" % str(epoch))
             torch.save(model_hybrid.state_dict(), checkpoint_path)
         elif valid_acc == best_acc_valid and training_acc > best_acc_train:
@@ -180,7 +256,3 @@ def valid_model(valid_dataloader, model, device, criterion):
 
 if __name__ == '__main__':
     train_model()
-
-
-
-

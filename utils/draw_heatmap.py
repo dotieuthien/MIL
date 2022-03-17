@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import configparser
 from openslide import open_slide
-from data_loaders.slide_loader import get_box_from_min_size, rgba2rgb
+from loaders.slide_loader import get_box_from_min_size, rgba2rgb
 
 import torch
 import torchvision

@@ -1,13 +1,17 @@
+from json import tool
 import time
 import os
 import copy
+from tokenize import group
+from matplotlib.colors import rgb2hex
 import matplotlib.pyplot as plt
 import argparse
 import cv2
+from xml.dom import minidom
 import numpy as np
 import configparser
 from openslide import open_slide
-from data_loaders.slide_loader import rgba2rgb
+from loaders.slide_loader import rgba2rgb
 
 import torch
 import torchvision
@@ -46,46 +50,62 @@ def segment_foreground(img, mthresh=7, sthresh=5, sthresh_up=255):
     return img_otsu
 
 
-def get_box_from_min_size(slide_img, max_size_box=224):
-    """Split images into patches with size = 224
+def get_box_from_min_size(slide_img):
+    """Get coordinate of foreground and compute the sclae factor
 
     Args:
-        slide_img : whole-slide image
-        max_size_box (int, optional): size of each patch to split. Defaults to 224.
+        slide_img ([type]): [description]
 
     Returns:
-        coords [list]: [j: width, i: height]
-        w_scale, h_scale
+        [type]: [description]
     """
     # Resolution of whole-slide
     max_size = slide_img.level_dimensions[0]
     min_size = slide_img.level_dimensions[-1]
 
+    print('Size of level 0 is ', max_size)
+    print('Size of min level is ', min_size)
+
     # Scale factor between min and max resolution
     w_scale = max_size[0] / min_size[0]
     h_scale = max_size[1] / min_size[1]
 
+    print('Scale factor is ', w_scale, h_scale)
+
     min_img = slide_img.read_region((0, 0), slide_img.level_count - 1, slide_img.level_dimensions[-1])
     min_img = np.array(min_img)
 
+    # plt.imshow(min_img)
+    # plt.show()
+
     # Get foreground
     foreground_img = segment_foreground(min_img)
-    debug_img = np.zeros((min_size[1], min_size[0], 3))
-
     coords = np.where(foreground_img == 255)
+    rows, cols = coords
+    coords = (cols, rows)
 
-    fig = plt.figure()
-    fig.add_subplot(1, 2, 1)
-    plt.imshow(min_img)
-    fig.add_subplot(1, 2, 2)
-    plt.imshow(foreground_img)
-    plt.show()
+    # fig = plt.figure()
+    # fig.add_subplot(1, 2, 1)
+    # plt.imshow(min_img)
+    # fig.add_subplot(1, 2, 2)
+    # plt.imshow(foreground_img)
+    # plt.show()
     
     return coords, w_scale, h_scale
 
 
 def get_batch_of_patches(w_scale, h_scale, coord, slide, trans_func):
-    """[summary]
+    """Concat all patches in a region to a batch
+
+    Args:
+        w_scale ([type]): [description]
+        h_scale ([type]): [description]
+        coord ([type]): [description]
+        slide ([type]): [description]
+        trans_func ([type]): [description]
+
+    Returns:
+        [type]: [description]
     """
     # A pixel in min image represents for (scale factor / patches size) patches
     patch_per_pixel_w = round(w_scale / 224)
@@ -105,9 +125,13 @@ def get_batch_of_patches(w_scale, h_scale, coord, slide, trans_func):
     # Get the batch of patch
     batch = None
     for index, top_left in enumerate(top_left_coords):
-        box_img = slide.read_region(top_left, 0, (224, 224))
+        box_img = slide.read_region((top_left[0], top_left[1]), 0, (224, 224))
+        print(top_left)
         box_img = np.array(box_img)
         box_img = rgba2rgb(box_img)
+
+        # plt.imshow(box_img)
+        # plt.show()
 
         # Convert image to tensor
         box_tensor = trans_func(box_img)
@@ -120,7 +144,7 @@ def get_batch_of_patches(w_scale, h_scale, coord, slide, trans_func):
     return batch
 
 
-def patching(slide_path, checkpoint_path):
+def compute_heatmap(slide_path, checkpoint_path, output_path):
     """
 
     Args:
@@ -143,7 +167,12 @@ def patching(slide_path, checkpoint_path):
 
     # Read slide
     slide = open_slide(slide_path)
-    # coords format [width, height]
+    slide_name = os.path.basename(slide_path)[:-5]
+    heatmap_path1 = os.path.join(output_path, slide_name + '.heatmap1.png')
+    heatmap_path2 = os.path.join(output_path, slide_name + '.heatmap2.png')
+    print(slide_name, heatmap_path2)
+
+    # coords format [WIDTH, HEIGHT]
     coords, w_scale, h_scale = get_box_from_min_size(slide)
     num_coord = len(coords[0])
     w, h = slide.level_dimensions[-1]
@@ -158,7 +187,8 @@ def patching(slide_path, checkpoint_path):
     with torch.no_grad():
         for box_id in range(num_coord):
             print('Process box %d/%d' % (box_id, num_coord))
-            coord = [coords[1][box_id], coords[0][box_id]]
+            # WIDTH, HEIGHT
+            coord = [coords[0][box_id], coords[1][box_id]]
 
             batch = get_batch_of_patches(w_scale, h_scale, coord, slide, trans_func)
             batch = batch.to(device)
@@ -184,11 +214,240 @@ def patching(slide_path, checkpoint_path):
             else:
                 heatmap1[coord[1], coord[0], :] = [10, 100, 200]
 
-    cv2.imwrite('/home/hades/Desktop/q/data/slide/mrxs/B00.12534_A.heatmap1_.png', heatmap1)
-    cv2.imwrite('/home/hades/Desktop/q/data/slide/mrxs/B00.12534_A.heatmap2_.png', heatmap2)
+    cv2.imwrite(heatmap_path1, heatmap1)
+    cv2.imwrite(heatmap_path2, heatmap2)
     return
 
 
+def show_3d(prob_heatmap_path):
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D
+    import numpy as np
+    from matplotlib import cm
+
+    prob_heatmap = 255 - np.array(cv2.imread(prob_heatmap_path, 0), np.uint8)
+    prob_heatmap = cv2.threshold(prob_heatmap, 70, 255, cv2.THRESH_BINARY)[1]
+    plt.imshow(prob_heatmap)
+    plt.show()
+
+    h, w = prob_heatmap.shape
+    x, y = np.meshgrid(np.linspace(0,w, w), np.linspace(0,h,h))
+    print(x.shape, y.shape)
+    z = prob_heatmap
+    print(z.shape)
+
+    # create the figure
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+    ax.plot_surface(x, y, z, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+    plt.show()
+
+
+def create_xml(binary_heatmap_path, prob_heatmap_path, slide_path, outpath):
+    """[summary]
+
+    Args:
+        binary_heatmap_path ([type]): [description]
+        prob_heatmap_path ([type]): [description]
+        slide_path ([type]): [description]
+    """
+    # Read slide
+    slide_img = open_slide(slide_path)
+    slide_name = os.path.basename(slide_path)[:-5]
+
+    # Resolution of whole-slide
+    max_size = slide_img.level_dimensions[0]
+    min_size = slide_img.level_dimensions[-1]
+
+    # Scale factor between min and max resolution
+    w_scale = max_size[0] / min_size[0]
+    h_scale = max_size[1] / min_size[1]
+    
+    # Read heatmap
+    heatmap1 = cv2.imread(binary_heatmap_path, 0)
+    plt.imshow(heatmap1)
+    plt.show()
+
+    # tumor
+    t_X, t_Y = np.where(heatmap1 == 119)
+
+    root = minidom.Document()
+    
+    # Create ASAP
+    asap = root.createElement('ASAP_Annotations') 
+    root.appendChild(asap)
+    
+    # Create Anns
+    anns = root.createElement('Annotations')
+    asap.appendChild(anns)
+
+    # Create Groups
+    ann_groups = root.createElement('AnnotationGroups')
+    asap.appendChild(ann_groups)
+
+    # Add Annotation to Annotations
+    num_tumor = len(t_X)
+
+    for i in range(num_tumor):
+        ann = root.createElement('Annotation')
+        anns.appendChild(ann)
+        ann.setAttribute('Name', 'tumor' + str(i + 1))
+        ann.setAttribute('Type', 'Rectangle')
+        ann.setAttribute('PartOfGroup', 'tumor')
+        ann.setAttribute('Color', '#f4fa58')
+
+         # Add Coordinates to Annotation
+        for j in range(1):
+            coords = root.createElement('Coordinates')
+            ann.appendChild(coords)
+
+            # Add Coordinate to Coordinates
+            # fake_X = ['394264.375', '397211.438', '397211.438', '394264.375']
+            # fake_Y = ['166660.297', '166660.297', '169909.609', '169909.609']
+
+            min_x = t_X[i] * h_scale
+            min_y = t_Y[i] * w_scale
+            max_x = min_x + h_scale
+            max_y = min_y + w_scale
+            fake_X = [str(min_y), str(max_y), str(max_y), str(min_y)]
+            fake_Y = [str(min_x), str(min_x), str(max_x), str(max_x)]
+
+            for t in range(4):
+                coord = root.createElement('Coordinate')
+                coords.appendChild(coord)
+                coord.setAttribute('Order', str(t))
+                coord.setAttribute('X', fake_X[t])
+                coord.setAttribute('Y', fake_Y[t])
+
+    # Add Group to AnnotationGroups
+    class_names = ['tumor', 'normal']
+    class_colors = ['#f4fa58', '#aa0000']
+    for i in range(2):
+        gr = root.createElement('Group')
+        ann_groups.appendChild(gr)
+        att = root.createElement('Attributes')
+        gr.appendChild(att)
+        gr.setAttribute('Name', class_names[i])
+        gr.setAttribute('PartOfGroup', 'None')
+        gr.setAttribute('Color', class_colors[i])
+    
+    xml_str = root.toprettyxml(indent ="\t") 
+    save_path_file = os.path.join(outpath, slide_name + '.xml')
+    
+    with open(save_path_file, "w") as f:
+        f.write(xml_str)
+
+
+def create_prob_xml(
+    prob_heatmap_path, 
+    slide_path, 
+    outpath):
+    """
+
+    Args:
+        prob_heatmap_path (str): path to probability map
+        slide_path (str): path to whole slide
+        outpath (str): output path
+    """
+    # Read slide
+    slide_img = open_slide(slide_path)
+    slide_name = os.path.basename(slide_path)[:-5]
+
+    # Resolution of whole-slide
+    max_size = slide_img.level_dimensions[0]
+    min_size = slide_img.level_dimensions[-1]
+
+    # Scale factor between min and max resolution
+    w_scale = max_size[0] / min_size[0]
+    h_scale = max_size[1] / min_size[1]
+    
+    # Read heatmap
+    heatmap2 = cv2.imread(prob_heatmap_path)
+    gray_heatmap2 = cv2.cvtColor(heatmap2, cv2.COLOR_BGR2GRAY)
+    
+    # Tumor coordinates
+    t_X, t_Y = np.where(gray_heatmap2 != 255)
+
+    root = minidom.Document()
+    
+    # Create ASAP
+    asap = root.createElement('ASAP_Annotations') 
+    root.appendChild(asap)
+    
+    # Create Anns
+    anns = root.createElement('Annotations')
+    asap.appendChild(anns)
+
+    # Create Groups
+    ann_groups = root.createElement('AnnotationGroups')
+    asap.appendChild(ann_groups)
+
+    # Add Annotation to Annotations
+    num_tumor = 200
+
+    for i in range(num_tumor):
+        # Probability
+        prob_color = heatmap2[t_X[i], t_Y[i], :] / 255
+        b, g, r = prob_color
+        hex_color = rgb2hex((r, g, b))
+        ann = root.createElement('Annotation')
+        anns.appendChild(ann)
+        ann.setAttribute('Name', 'tumor' + str(i + 1))
+        ann.setAttribute('Type', 'Rectangle')
+        ann.setAttribute('PartOfGroup', 'tumor')
+        ann.setAttribute('Color', str(hex_color))
+
+        # Add Coordinates to Annotation
+        for j in range(1):
+            coords = root.createElement('Coordinates')
+            ann.appendChild(coords)
+
+            # Add Coordinate to Coordinates
+            min_x = t_X[i] * h_scale
+            min_y = t_Y[i] * w_scale
+            max_x = min_x + h_scale
+            max_y = min_y + w_scale
+            fake_X = [str(min_y), str(max_y), str(max_y), str(min_y)]
+            fake_Y = [str(min_x), str(min_x), str(max_x), str(max_x)]
+
+            for t in range(4):
+                coord = root.createElement('Coordinate')
+                coords.appendChild(coord)
+                coord.setAttribute('Order', str(t))
+                coord.setAttribute('X', fake_X[t])
+                coord.setAttribute('Y', fake_Y[t])
+
+    # Add Group to AnnotationGroups
+    class_names = ['tumor', 'normal']
+    class_colors = ['#f4fa58', '#aa0000']
+    for i in range(2):
+        gr = root.createElement('Group')
+        ann_groups.appendChild(gr)
+        att = root.createElement('Attributes')
+        gr.appendChild(att)
+        gr.setAttribute('Name', class_names[i])
+        gr.setAttribute('PartOfGroup', 'None')
+        gr.setAttribute('Color', class_colors[i])
+    
+    xml_str = root.toprettyxml(indent ="\t") 
+    save_path_file = os.path.join(outpath, slide_name + '.xml')
+    
+    with open(save_path_file, "w") as f:
+        f.write(xml_str)
+
+
 if __name__ == '__main__':
-    patching('/home/hades/Desktop/q/data/slide/mrxs/B00.12534_A.mrxs',
-    '/home/hades/Desktop/q/runs/exp_qresnet3/best_checkpoint_14.pth')
+    create_xml('/mnt/d/q/data_test/slide/predictions/B2018.28271_7C.binary.png', 
+    '/mnt/d/q/data_test/slide/predictions/B2018.28271_7C.prob.png',
+    '/mnt/d/q/data_test/slide/mrxs/B2018.28271_7C.mrxs',
+    '/mnt/d/q/data_test/slide/mrxs')
+
+    # show_3d("/mnt/d/q/data_test/slide/mrxs/B2018.28271_10B.heatmap2_.png")
+    # show_3d("/mnt/d/q/data_test/slide/mrxs/B00.12534_A.heatmap2_.png")
+
+    # compute_heatmap('/mnt/d/q/data_test/slide/mrxs/B2018.28271_7B.mrxs',
+    # '/mnt/d/q/runs/exp_qresnet3/best_checkpoint_14.pth',
+    # '/mnt/d/q/data_test/slide/mrxs')
+
+    # debug_heatmap('/home/hades/Desktop/q/data/slide/mrxs/B2018.18540_10B.mrxs',
+    # '/home/hades/Desktop/q/data/slide/mrxs/B2018.18540_10B.heatmap1_.png')

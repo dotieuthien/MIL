@@ -49,10 +49,6 @@ Script outputs:
 ### MIL Testing
 To run a model on a test set, use script `MIL_test.py`. Run `python MIL_test.py -h` to get help regarding input parameters.
 
-```
-python RNN_train.py --train_lib path/to/data/file/tile.pth --val_lib path/to/data/file/tile.pth --model path/to/checkpoint/MIL-nature-medicine-2019/checkpoint_best.pth
-```
-
 Script outputs:
 * **predictions.csv**: *.csv* file with slide name, slide target, model prediction and tumor probability entries for each slide in the test data. This file can be used to generate confusion matrix, ROC curve and AUC.
 
@@ -68,6 +64,11 @@ Input data, whether for training, validation or testing, should be a dictionary 
 
 ### RNN Training
 To train the RNN aggregator model, use script `RNN_train.py`. Run `python RNN_train.py -h` to get help regarding input parameters. You will need to have a trained embedder using the script `MIL_train.py`.
+
+```
+python RNN_train.py --train_lib path/to/data/file/tile.pth --val_lib path/to/data/file/tile.pth --model path/to/checkpoint/MIL-nature-medicine-2019/checkpoint_best.pth
+```
+
 Script outputs:
 * **convergence.csv**: *.csv* file containing training loss and validation error metrics.
 * **rnn_checkpoint_best.pth**: file containing the weights of the best model on the validation set. This file can be used with the `RNN_test.py` script.

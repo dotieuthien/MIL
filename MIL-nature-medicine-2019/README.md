@@ -25,7 +25,7 @@ grid = [
 To create input data, you organize your dataset :
 ```
 $DATA/
-|–– Slides/
+|–– slide-dataset/
 |   |–– tumor_slides/ 
 |   |   |-- B05.4754_E.mrxs/
 |   |   |-- B09.10583_VI E.mrxs/

@@ -1,4 +1,4 @@
-from utils.segment import segment_foreground
+from utils.create_heatmap import segment_foreground
 from openslide import open_slide
 import numpy as np
 

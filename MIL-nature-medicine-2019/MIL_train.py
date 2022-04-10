@@ -19,6 +19,7 @@ parser.add_argument('--train_lib', type=str, default='', help='path to train MIL
 parser.add_argument('--val_lib', type=str, default='', help='path to validation MIL library binary. If present.')
 parser.add_argument('--output', type=str, default='.', help='name of output file')
 parser.add_argument('--batch_size', type=int, default=512, help='mini-batch size (default: 512)')
+parser.add_argument('--img_size', default=512, type=int, help='Size of tile')
 parser.add_argument('--nepochs', type=int, default=100, help='number of epochs')
 parser.add_argument('--workers', default=4, type=int, help='number of data loading workers (default: 4)')
 parser.add_argument('--test_every', default=10, type=int, help='test on val every (default: 10)')
@@ -217,7 +218,7 @@ class MILdataset(data.Dataset):
         self.transform = transform
         self.mode = None
         self.mult = lib['mult']
-        self.size = int(np.round(224*lib['mult']))
+        self.size = int(np.round(args.img_size * lib['mult']))
         self.level = lib['level']
 
     def setmode(self, mode):
@@ -233,9 +234,9 @@ class MILdataset(data.Dataset):
         if self.mode == 1:
             slideIDX = self.slideIDX[index]
             coord = self.grid[index]
-            img = self.slides[slideIDX].read_region(coord,self.level,(self.size,self.size)).convert('RGB')
+            img = self.slides[slideIDX].read_region(coord, self.level, (self.size,self.size)).convert('RGB')
             if self.mult != 1:
-                img = img.resize((224,224),Image.BILINEAR)
+                img = img.resize((args.img_size, args.img_size), Image.BILINEAR)
             if self.transform is not None:
                 img = self.transform(img)
             return img
@@ -244,7 +245,7 @@ class MILdataset(data.Dataset):
             slideIDX, coord, target = self.t_data[index]
             img = self.slides[slideIDX].read_region(coord,self.level,(self.size,self.size)).convert('RGB')
             if self.mult != 1:
-                img = img.resize((224,224),Image.BILINEAR)
+                img = img.resize((args.img_size, args.img_size),Image.BILINEAR)
             if self.transform is not None:
                 img = self.transform(img)
             return img, target

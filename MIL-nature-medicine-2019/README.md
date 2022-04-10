@@ -37,12 +37,22 @@ And then, run `python MIL-nature-medicine-2019/prepare_data_file.py` to create i
 
 ### MIL Training
 To train a model, use script `MIL_train.py`. Run `python MIL_train.py -h` to get help regarding input parameters.
+
+```
+python MIL_train.py --train_lib path/to/data/file/tile.pth --val_lib path/to/data/file/tile.pth --k 100 --test_every 1
+```
+
 Script outputs:
 * **convergence.csv**: *.csv* file containing training loss and validation error metrics.
 * **checkpoint_best.pth**: file containing the weights of the best model on the validation set. This file can be used with the `MIL_test.py` script to run the model on a test set. In addition, this file can be used to generate the embedding needed to train the RNN aggregator.
 
 ### MIL Testing
 To run a model on a test set, use script `MIL_test.py`. Run `python MIL_test.py -h` to get help regarding input parameters.
+
+```
+python RNN_train.py --train_lib path/to/data/file/tile.pth --val_lib path/to/data/file/tile.pth --model path/to/checkpoint/MIL-nature-medicine-2019/checkpoint_best.pth
+```
+
 Script outputs:
 * **predictions.csv**: *.csv* file with slide name, slide target, model prediction and tumor probability entries for each slide in the test data. This file can be used to generate confusion matrix, ROC curve and AUC.
 

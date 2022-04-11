@@ -36,10 +36,10 @@ $DATA/
 And then, run `python MIL-nature-medicine-2019/prepare_data_file.py` to create input file to train MIL and RNN.
 
 ### MIL Training
-To train a model, use script `MIL_train.py`. Run `python MIL_train.py -h` to get help regarding input parameters.
+To train a model, use script `MIL_train.py`. Run `python MIL_train.py -h` to get help regarding input parameters. Set `True` for `--use_quantum` if you want to use `DressedQuantum` layer.
 
 ```
-python MIL_train.py --train_lib path/to/data/file/tile.pth --val_lib path/to/data/file/tile.pth --k 100 --test_every 1
+python MIL_train.py --train_lib path/to/data/file/tile.pth --val_lib path/to/data/file/tile.pth --k 100 --test_every 1 --use_quantum True
 ```
 
 Script outputs:
@@ -48,6 +48,10 @@ Script outputs:
 
 ### MIL Testing
 To run a model on a test set, use script `MIL_test.py`. Run `python MIL_test.py -h` to get help regarding input parameters.
+
+```
+python MIL_test.py --lib path/to/data/file/tile.pth --model path/to/checkpoint/MIL-nature-medicine-2019/checkpoint_best.pth --use_quantum True
+```
 
 Script outputs:
 * **predictions.csv**: *.csv* file with slide name, slide target, model prediction and tumor probability entries for each slide in the test data. This file can be used to generate confusion matrix, ROC curve and AUC.

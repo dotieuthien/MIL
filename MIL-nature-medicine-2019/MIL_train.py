@@ -13,6 +13,7 @@ import torch.nn.functional as F
 import torch.utils.data as data
 import torchvision.transforms as transforms
 import torchvision.models as models
+from models.qresnet import DressedQuantumNet
 
 parser = argparse.ArgumentParser(description='MIL-nature-medicine-2019 tile classifier training script')
 parser.add_argument('--train_lib', type=str, default='', help='path to train MIL library binary')
@@ -25,6 +26,7 @@ parser.add_argument('--workers', default=4, type=int, help='number of data loadi
 parser.add_argument('--test_every', default=10, type=int, help='test on val every (default: 10)')
 parser.add_argument('--weights', default=0.5, type=float, help='unbalanced positive class weight (default: 0.5, balanced classes)')
 parser.add_argument('--k', default=1, type=int, help='top k tiles are assumed to be of the same class as the slide (default: 1, standard MIL)')
+parser.add_argument('--use_quantum', default=False, type=bool, help='Use quantum layer for output of CNN')
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -36,7 +38,14 @@ def main():
 
     # CNN model
     model = models.resnet34(True)
-    model.fc = nn.Linear(model.fc.in_features, 2)
+    if not args.use_quantum:
+        model.fc = nn.Linear(model.fc.in_features, 2)
+    else:
+        model.fc = DressedQuantumNet()
+        # Check model
+        for child in model.children():
+            print(child)
+        
     model.to(device)
 
     if args.weights==0.5:
@@ -122,6 +131,7 @@ def main():
 def inference(run, loader, model):
     model.eval()
     probs = torch.FloatTensor(len(loader.dataset))
+
     with torch.no_grad():
         for i, input in enumerate(loader):
             sys.stdout.write('Inference\tEpoch: [{}/{}]\tBatch: [{}/{}]\r'.format(run+1, args.nepochs, i+1, len(loader)))

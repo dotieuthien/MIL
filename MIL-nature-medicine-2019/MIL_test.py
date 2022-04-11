@@ -13,6 +13,7 @@ import torch.nn.functional as F
 import torch.utils.data as data
 import torchvision.transforms as transforms
 import torchvision.models as models
+from models.qresnet import DressedQuantumNet
 
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('--lib', type=str, default='filelist', help='path to data file')
@@ -20,24 +21,32 @@ parser.add_argument('--output', type=str, default='.', help='name of output dire
 parser.add_argument('--model', type=str, default='', help='path to pretrained model')
 parser.add_argument('--batch_size', type=int, default=100, help='how many images to sample per slide (default: 100)')
 parser.add_argument('--workers', default=4, type=int, help='number of data loading workers (default: 4)')
+parser.add_argument('--use_quantum', default=False, type=bool, help='Use quantum layer for output of CNN')
+
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def main():
     global args
     args = parser.parse_args()
 
-    #load model
+    # Load model
     model = models.resnet34(True)
-    model.fc = nn.Linear(model.fc.in_features, 2)
+    if not args.use_quantum:
+        model.fc = nn.Linear(model.fc.in_features, 2)
+    else:
+        model.fc = DressedQuantumNet()
+
     ch = torch.load(args.model)
     model.load_state_dict(ch['state_dict'])
-    model = model.cuda()
+    model = model.to(device)
     cudnn.benchmark = True
 
-    #normalization
+    # Normalization
     normalize = transforms.Normalize(mean=[0.5,0.5,0.5],std=[0.1,0.1,0.1])
     trans = transforms.Compose([transforms.ToTensor(),normalize])
 
-    #load data
+    # Load data
     dset = MILdataset(args.lib, trans)
     loader = torch.utils.data.DataLoader(
         dset,
@@ -60,7 +69,7 @@ def inference(loader, model):
     with torch.no_grad():
         for i, input in enumerate(loader):
             print('Batch: [{}/{}]'.format(i+1, len(loader)))
-            input = input.cuda()
+            input = input.to(device)
             output = F.softmax(model(input), dim=1)
             probs[i*args.batch_size:i*args.batch_size+input.size(0)] = output.detach()[:,1].clone()
     return probs.cpu().numpy()

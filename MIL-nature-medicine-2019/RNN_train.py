@@ -13,20 +13,24 @@ import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 import torchvision.models as models
+from models.qresnet import DressedQuantumNet
+from models.qtransformer import SlideClassifier
 
 parser = argparse.ArgumentParser(description='MIL-nature-medicine-2019 RNN aggregator training script')
 parser.add_argument('--train_lib', type=str, default='', help='path to train MIL library binary')
 parser.add_argument('--val_lib', type=str, default='', help='path to validation MIL library binary. If present.')
 parser.add_argument('--output', type=str, default='.', help='name of output file')
-parser.add_argument('--batch_size', type=int, default=128, help='mini-batch size (default: 128)')
+parser.add_argument('--batch_size', type=int, default=2, help='mini-batch size (default: 128)')
 parser.add_argument('--img_size', default=512, type=int, help='Size of tile')
 parser.add_argument('--nepochs', type=int, default=100, help='number of epochs')
 parser.add_argument('--workers', default=4, type=int, help='number of data loading workers (default: 4)')
-parser.add_argument('--s', default=10, type=int, help='how many top k tiles to consider (default: 10)')
+parser.add_argument('--s', default=100, type=int, help='how many top k tiles to consider (default: 10)')
 parser.add_argument('--ndims', default=128, type=int, help='length of hidden representation (default: 128)')
 parser.add_argument('--model', type=str, help='path to trained model checkpoint')
 parser.add_argument('--weights', default=0.5, type=float, help='unbalanced positive class weight (default: 0.5, balanced classes)')
 parser.add_argument('--shuffle', action='store_true', help='to shuffle order of sequence')
+parser.add_argument('--use_quantum_cnn', default=True, type=bool, help='Use quantum layer for output of CNN')
+parser.add_argument('--use_quantum_rnn', default=True, type=bool, help='Use quantum layer for output of CNN')
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -60,7 +64,19 @@ def main():
     embedder = embedder.to(device)
     embedder.eval()
 
-    rnn = rnn_single(args.ndims)
+    if not args.use_quantum_rnn:
+        rnn = rnn_single(args.ndims)
+    else:
+        rnn = SlideClassifier(
+            embed_dim=512,
+            num_heads=4,
+            num_blocks=4,
+            num_classes=2,
+            ffn_dim=128,
+            n_qubits_transformer=0,
+            n_qubits_ffn=4,
+            n_qlayers=3,
+        )
     rnn = rnn.to(device)
     
     # Optimization
@@ -101,17 +117,30 @@ def train_single(epoch, embedder, rnn, loader, criterion, optimizer):
     running_fps = 0.
     running_fns = 0.
 
-    for i,(inputs,target) in enumerate(loader):
+    for i, (inputs, target) in enumerate(loader):
         print('Training - Epoch: [{}/{}]\tBatch: [{}/{}]'.format(epoch+1, args.nepochs, i+1, len(loader)))
 
         batch_size = inputs[0].size(0)
         rnn.zero_grad()
 
-        state = rnn.init_hidden(batch_size).to(device)
-        for s in range(len(inputs)):
-            input = inputs[s].to(device)
-            _, input = embedder(input)
-            output, state = rnn(input, state)
+        if not args.use_quantum_rnn:
+            state = rnn.init_hidden(batch_size).to(device)
+            for s in range(len(inputs)):
+                input = inputs[s].to(device)
+                # batch_size, embedding
+                _, input = embedder(input)
+                output, state = rnn(input, state)
+        else:
+            input_rnn = []
+            for s in range(len(inputs)):
+                input = inputs[s].to(device)
+                # batch_size, embedding
+                _, input = embedder(input)
+                input = input.unsqueeze(1)
+                input_rnn.append(input)
+
+            inputs = torch.cat(input_rnn, dim=1)
+            output = rnn(inputs)
 
         target = target.to(device)
         loss = criterion(output, target)
@@ -136,16 +165,29 @@ def test_single(epoch, embedder, rnn, loader, criterion):
     running_fns = 0.
 
     with torch.no_grad():
-        for i,(inputs,target) in enumerate(loader):
+        for i, (inputs, target) in enumerate(loader):
             print('Validating - Epoch: [{}/{}]\tBatch: [{}/{}]'.format(epoch+1,args.nepochs,i+1,len(loader)))
             
             batch_size = inputs[0].size(0)
             
-            state = rnn.init_hidden(batch_size).to(device)
-            for s in range(len(inputs)):
-                input = inputs[s].to(device)
-                _, input = embedder(input)
-                output, state = rnn(input, state)
+            if not args.use_quantum_rnn:
+                state = rnn.init_hidden(batch_size).to(device)
+                for s in range(len(inputs)):
+                    input = inputs[s].to(device)
+                    # batch_size, embedding
+                    _, input = embedder(input)
+                    output, state = rnn(input, state)
+            else:
+                input_rnn = []
+                for s in range(len(inputs)):
+                    input = inputs[s].to(device)
+                    # batch_size, embedding
+                    _, input = embedder(input)
+                    input = input.unsqueeze(1)
+                    input_rnn.append(input)
+
+                inputs = torch.cat(input_rnn, dim=1)
+                output = rnn(inputs)
             
             target = target.to(device)
             loss = criterion(output,target)
@@ -176,7 +218,11 @@ class ResNetEncoder(nn.Module):
         super(ResNetEncoder, self).__init__()
 
         temp = models.resnet34()
-        temp.fc = nn.Linear(temp.fc.in_features, 2)
+        if not args.use_quantum_cnn:
+            temp.fc = nn.Linear(temp.fc.in_features, 2)
+        else:
+            temp.fc = DressedQuantumNet()
+
         ch = torch.load(path)
         temp.load_state_dict(ch['state_dict'])
         self.features = nn.Sequential(*list(temp.children())[:-1])
@@ -203,7 +249,7 @@ class rnn_single(nn.Module):
     def forward(self, input, state):
         input = self.fc1(input)
         state = self.fc2(state)
-        state = self.activation(state+input)
+        state = self.activation(state + input)
         output = self.fc3(state)
         return output, state
 
@@ -233,15 +279,16 @@ class rnndata(data.Dataset):
         print('')
         self.slides = slides
 
-    def __getitem__(self,index):
+    def __getitem__(self, index):
 
         slide = self.slides[index]
         grid = self.grid[index]
         if self.shuffle:
-            grid = random.sample(grid,len(grid))
+            grid = random.sample(grid, len(grid))
 
         out = []
         s = min(self.s, len(grid))
+
         for i in range(s):
             img = slide.read_region(grid[i], self.level, (self.size, self.size)).convert('RGB')
             if self.mult != 1:
@@ -249,7 +296,7 @@ class rnndata(data.Dataset):
             if self.transform is not None:
                 img = self.transform(img)
             out.append(img)
-        
+
         return out, self.targets[index]
 
     def __len__(self):

@@ -248,12 +248,20 @@ class TransformerBlockClassical(TransformerBlockBase):
     def __init__(self,
                  embed_dim: int,
                  num_heads: int,
-                 ff_dim: int,
+                 ffn_dim: int,
+                 n_qubits_ffn: int = 0,
+                 n_qlayers: int = 1,
                  dropout: float = 0.1,
-                 mask=None):
-        super(TransformerBlockClassical, self).__init__(embed_dim, num_heads, ff_dim, dropout, mask)
+                 mask=None,
+                 q_device='default.qubit'):
+        super(TransformerBlockClassical, self).__init__(embed_dim, num_heads, ffn_dim, dropout, mask)
         self.attn = MultiHeadAttentionClassical(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout, mask=mask)
-        self.ffn = FeedForwardClassical(embed_dim, ff_dim)
+        
+        if n_qubits_ffn > 0:
+            self.ffn = FeedForwardQuantum(embed_dim, n_qubits_ffn, n_qlayers, q_device=q_device)
+        else:
+            self.ffn = FeedForwardClassical(embed_dim, ffn_dim)
+
 
 
 class TransformerBlockQuantum(TransformerBlockBase):
@@ -310,27 +318,27 @@ class PositionalEncoder(nn.Module):
         return x
 
 
-class TextClassifier(nn.Module):
+class SlideClassifier(nn.Module):
     def __init__(self,
                  embed_dim: int,
                  num_heads: int,
                  num_blocks: int,
                  num_classes: int,
-                 vocab_size: int,
-                 ffn_dim: int = 32,
+                #  vocab_size: int,
+                 ffn_dim: int,
                  n_qubits_transformer: int = 0,
                  n_qubits_ffn: int = 0,
                  n_qlayers: int = 1,
                  dropout=0.1,
-                 q_device="device.qubit"):
-        super(TextClassifier, self).__init__()
+                 q_device="default.qubit"):
+        super(SlideClassifier, self).__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.num_blocks = num_blocks
         self.num_classes = num_classes
-        self.vocab_size = vocab_size
+        # self.vocab_size = vocab_size
 
-        self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+        # self.token_embedding = nn.Embedding(vocab_size, embed_dim)
         self.pos_embedding = PositionalEncoder(embed_dim)
 
         print(f"++ There will be {num_blocks} transformer blocks")
@@ -352,19 +360,24 @@ class TextClassifier(nn.Module):
             ]
         else:
             transformer_blocks = [
-                TransformerBlockClassical(embed_dim, num_heads, ffn_dim) for _ in range(num_blocks)
+                TransformerBlockClassical(embed_dim, num_heads, ffn_dim,
+                                        n_qubits_ffn=n_qubits_ffn,
+                                        n_qlayers=n_qlayers,
+                                        q_device=q_device) for _ in range(num_blocks)
             ]
 
         self.transformers = nn.Sequential(*transformer_blocks)
-        if self.num_classes > 2:
-            self.class_logits = nn.Linear(embed_dim, num_classes)
-        else:
-            self.class_logits = nn.Linear(embed_dim, 1)
+        # if self.num_classes > 2:
+        #     self.class_logits = nn.Linear(embed_dim, num_classes)
+        # else:
+        #     self.class_logits = nn.Linear(embed_dim, 1)
+        self.class_logits = nn.Linear(embed_dim, num_classes)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        tokens = self.token_embedding(x)
+        # tokens = self.token_embedding(x)
         # batch_size, seq_len, embed_dim = x.size()
+        tokens = x
         x = self.pos_embedding(tokens)
         x = self.transformers(x)
         x = x.mean(dim=1)  # global average pooling, works in 1D

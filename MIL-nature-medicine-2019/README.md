@@ -70,7 +70,7 @@ Input data, whether for training, validation or testing, should be a dictionary 
 To train the RNN aggregator model, use script `RNN_train.py`. Run `python RNN_train.py -h` to get help regarding input parameters. You will need to have a trained embedder using the script `MIL_train.py`.
 
 ```
-python RNN_train.py --train_lib path/to/data/file/tile.pth --val_lib path/to/data/file/tile.pth --model path/to/checkpoint/MIL-nature-medicine-2019/checkpoint_best.pth
+python RNN_train.py --train_lib path/to/data/file/tile.pth --val_lib path/to/data/file/tile.pth --model path/to/checkpoint/MIL-nature-medicine-2019/checkpoint_best.pth --use_quantum_cnn True --use_quantum_rnn True
 ```
 
 Script outputs:

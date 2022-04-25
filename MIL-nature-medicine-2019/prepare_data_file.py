@@ -44,24 +44,28 @@ def create_data_mil(slide_folder, output_path):
         w, h = min_dim
         for i in range(h):
             for j in range(w):
+                # if j > 20 and i > 10:
+                #     continue
+
                 if foreground_img[i, j] == 255:
                     min_level_coord = [j, i]
                     level_0_coord = np.array(scale_factor) * np.array(min_level_coord)
                     level_0_coord = np.array(level_0_coord, dtype=np.int)
                     level_0_coord = tuple(level_0_coord)
                     grid.append(level_0_coord)
-
+        print(len(grid))
         libraryfile['grid'].append(grid)
         if slide_cls == 'normal_slides':
             libraryfile['targets'].append(0)
         elif slide_cls == 'tumor_slides':
             libraryfile['targets'].append(1)
+            break
 
     torch.save(libraryfile, output_path)
 
 
 if __name__ == "__main__":
-    data_folder = '/home/thiendo/Desktop/MIL/data/MIL_data'
-    output_path = '/home/thiendo/Desktop/MIL/data/MIL_data/tile.pth'
+    data_folder = '/home/thiendo/Desktop/pathology/MIL/data/slide-dataset'
+    output_path = '/home/thiendo/Desktop/pathology/MIL/data/slide-dataset/tile.pth'
 
     create_data_mil(data_folder, output_path)

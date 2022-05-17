@@ -41,7 +41,7 @@ def main():
     args = parser.parse_args()
     
     # Load libraries
-    normalize = transforms.Normalize(mean=[0.5,0.5,0.5], std=[0.1,0.1,0.1])
+    normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.1, 0.1, 0.1])
     trans = transforms.Compose([
         transforms.ToTensor(),
         normalize
@@ -273,7 +273,7 @@ class rnndata(data.Dataset):
 
         slides = []
         for i, name in enumerate(lib['slides']):
-            sys.stdout.write('Opening SVS headers: [{}/{}]\r'.format(i+1, len(lib['slides'])))
+            sys.stdout.write('Opening SVS headers: [{}/{}]\r'.format(i + 1, len(lib['slides'])))
             sys.stdout.flush()
             slides.append(openslide.OpenSlide(name))
         print('')

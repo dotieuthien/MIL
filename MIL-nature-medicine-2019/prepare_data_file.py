@@ -44,8 +44,8 @@ def create_data_mil(slide_folder, output_path):
         w, h = min_dim
         for i in range(h):
             for j in range(w):
-                # if j > 20 and i > 10:
-                #     continue
+                if j > 20 and i > 10:
+                    continue
 
                 if foreground_img[i, j] == 255:
                     min_level_coord = [j, i]

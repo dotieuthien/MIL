@@ -13,23 +13,29 @@ import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
 import torchvision.models as models
+from models.qresnet import DressedQuantumNet
+from models.qtransformer import SlideClassifier
 
 parser = argparse.ArgumentParser(description='MIL-nature-medicine-2019 RNN aggregator training script')
 parser.add_argument('--lib', type=str, default='', help='path to train MIL library binary')
 parser.add_argument('--output', type=str, default='.', help='name of output file')
-parser.add_argument('--batch_size', type=int, default=128, help='mini-batch size (default: 128)')
+parser.add_argument('--batch_size', type=int, default=1, help='mini-batch size (default: 128)')
 parser.add_argument('--workers', default=4, type=int, help='number of data loading workers (default: 4)')
 parser.add_argument('--s', default=10, type=int, help='how many top k tiles to consider (default: 10)')
 parser.add_argument('--ndims', default=128, type=int, help='length of hidden representation (default: 128)')
 parser.add_argument('--model', type=str, help='path to trained model checkpoint')
 parser.add_argument('--rnn', type=str, help='path to trained RNN model checkpoint')
+parser.add_argument('--use_quantum_cnn', default=True, type=bool, help='Use quantum layer for output of CNN')
+parser.add_argument('--use_quantum_rnn', default=True, type=bool, help='Use quantum layer for output of CNN')
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def main():
     global args
     args = parser.parse_args()
     
-    #load libraries
-    normalize = transforms.Normalize(mean=[0.5,0.5,0.5],std=[0.1,0.1,0.1])
+    # load libraries
+    normalize = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.1, 0.1, 0.1])
     trans = transforms.Compose([
         transforms.ToTensor(),
         normalize
@@ -40,17 +46,31 @@ def main():
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=False)
 
-    #make model
+    # make model
     embedder = ResNetEncoder(args.model)
     for param in embedder.parameters():
         param.requires_grad = False
-    embedder = embedder.cuda()
+    embedder = embedder.to(device)
     embedder.eval()
 
-    rnn = rnn_single(args.ndims)
+    if not args.use_quantum_rnn:
+        rnn = rnn_single(args.ndims)
+    else:
+        rnn = SlideClassifier(
+            embed_dim=512,
+            num_heads=4,
+            num_blocks=4,
+            num_classes=2,
+            ffn_dim=128,
+            n_qubits_transformer=0,
+            n_qubits_ffn=4,
+            n_qlayers=3,
+        )
+    rnn = rnn.to(device)
+
     rnn_dict = torch.load(args.rnn)
     rnn.load_state_dict(rnn_dict['state_dict'])
-    rnn = rnn.cuda()
+    rnn = rnn.to(device)
     
     cudnn.benchmark = True
 
@@ -73,11 +93,24 @@ def test_single(embedder, rnn, loader):
             
             batch_size = inputs[0].size(0)
             
-            state = rnn.init_hidden(batch_size).cuda()
-            for s in range(len(inputs)):
-                input = inputs[s].cuda()
-                _, input = embedder(input)
-                output, state = rnn(input, state)
+            if not args.use_quantum_rnn:
+                state = rnn.init_hidden(batch_size).to(device)
+                for s in range(len(inputs)):
+                    input = inputs[s].to(device)
+                    # batch_size, embedding
+                    _, input = embedder(input)
+                    output, state = rnn(input, state)
+            else:
+                input_rnn = []
+                for s in range(len(inputs)):
+                    input = inputs[s].to(device)
+                    # batch_size, embedding
+                    _, input = embedder(input)
+                    input = input.unsqueeze(1)
+                    input_rnn.append(input)
+
+                inputs = torch.cat(input_rnn, dim=1)
+                output = rnn(inputs)
 
             output = F.softmax(output, dim=1)
             probs[i*args.batch_size:i*args.batch_size+batch_size] = output.detach()[:,1].clone()
@@ -90,7 +123,11 @@ class ResNetEncoder(nn.Module):
         super(ResNetEncoder, self).__init__()
 
         temp = models.resnet34()
-        temp.fc = nn.Linear(temp.fc.in_features, 2)
+        if not args.use_quantum_cnn:
+            temp.fc = nn.Linear(temp.fc.in_features, 2)
+        else:
+            temp.fc = DressedQuantumNet()
+
         ch = torch.load(path)
         temp.load_state_dict(ch['state_dict'])
         self.features = nn.Sequential(*list(temp.children())[:-1])
@@ -159,7 +196,7 @@ class rnndata(data.Dataset):
         for i in range(s):
             img = slide.read_region(grid[i], self.level, (self.size, self.size)).convert('RGB')
             if self.mult != 1:
-                img = img.resize((224,224), Image.BILINEAR)
+                img = img.resize((224, 224), Image.BILINEAR)
             if self.transform is not None:
                 img = self.transform(img)
             out.append(img)

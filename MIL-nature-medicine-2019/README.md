@@ -78,6 +78,11 @@ Script outputs:
 * **rnn_checkpoint_best.pth**: file containing the weights of the best model on the validation set. This file can be used with the `RNN_test.py` script.
 
 ### RNN Testing
+
+```
+python RNN_test.py --lib path/to/data/file/tile.pth --model path/to/checkpoint/MIL-nature-medicine-2019/checkpoint_best.pth --rnn path/to/checkpoint/MIL-nature-medicine-2019/rnn_checkpoint_best.pth
+```
+
 To run a model on a test set, use script `RNN_test.py`. Run `python RNN_test.py -h` to get help regarding input parameters.
 Script outputs:
 * **predictions.csv**: *.csv* file with slide name, slide target, model prediction and tumor probability entries for each slide in the test data. This file can be used to generate confusion matrix, ROC curve and AUC.
